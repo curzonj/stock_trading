@@ -1,0 +1,2 @@
+[database]
+url=postgres:///stock_research_v1?sslmode=disable
