@@ -1,10 +1,7 @@
 from zipline.api import *
 
-def universe():
-    return [ "SPY" ]
-
-def initialize(context):
-    context.sid = symbol("SPY") #spy
+def initialize(context, **kwargs):
+    context.sid = symbol(kwargs.pop('securities')[0]) #spy
 
     schedule_function(rebalance,
                       date_rule=date_rules.month_start(),

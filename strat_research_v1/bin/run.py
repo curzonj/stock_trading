@@ -10,7 +10,6 @@ import pickle
 import pyfolio as pf
 import pandas as pd
 
-from pathlib import Path
 from importlib import import_module
 
 from zipline.utils.factory import load_from_yahoo
@@ -36,7 +35,7 @@ Basically a reimplementation of the following but with my own goals:
 """
 
 @click.command()
-@click.argument('file')
+@click.argument('algofile', type=click.File('r'))
 @click.option(
     '-s',
     '--start',
@@ -51,35 +50,42 @@ Basically a reimplementation of the following but with my own goals:
     required=True,
     help='The end date of the simulation.',
 )
-def main(start, end, file):
+@click.option('--save/--no-save', default=True)
+@click.option('-D', '--define', multiple=True)
+@click.option('--securities', required=True)
+def main(algofile, start, end, save, define, securities):
     """Runs a strategy in FILE and saves the data in the database"""
-    path = Path(file)
+    frequency = 'daily'
 
-    if not path.is_file() or not os.access(file, os.R_OK):
-        print ("File is missing")
-        sys.exit(2)
-
-    result = runpy.run_path(file, None, file)
+    symbols = [ a.upper() for a in securities.split(',') ]
 
     start_data = start - pd.DateOffset(months=12)
 
-    data = load_from_yahoo(stocks=result.get('universe')(), indexes={}, start=start_data, end=end)
+    define_parts = [ assign.split('=', 2) for assign in define ]
+    define_dict = { a[0] : a[1] for a in define_parts }
+    define_dict['securities'] = symbols
+    define_dict['frequency'] = frequency
+
+    data = load_from_yahoo(stocks=symbols, indexes={}, start=start_data, end=end)
     data = data.dropna()
 
+    algotext = algofile.read()
+    algoname = getattr(algofile, 'name', '<algorithm>')
+
     algo = TradingAlgorithm(
-        handle_data=result.get('handle_data'),
-        initialize=result.get('initialize'),
-        before_trading_start=result.get('before_trading_start'),
+        script=algotext,
+        algo_filename= algoname,
         sim_params=create_simulation_parameters(
             start=start,
             end=end,
-            data_frequency='daily',
+            data_frequency=frequency
         ),
+        **define_dict
     )
 
     perf = algo.run(data, overwrite_sim_params=False)
-    dir(perf)
-    write_to_db(file, perf, start= start, end=end)
+    if save:
+        write_to_db(algoname, algotext, perf, define_dict, start, end)
 
 def render_pyfolio(perf):
     returns, positions, transactions, gross_lev = pf.utils.extract_rets_pos_txn_from_zipline(results)
@@ -87,34 +93,32 @@ def render_pyfolio(perf):
     pf.create_full_tear_sheet(returns, positions=positions,
                               transactions=transactions, gross_lev=gross_lev, round_trips=True)
 
-def write_to_db(file, perf, **kwargs):
-    with open(file, "rb") as f:
-        b_contents = f.read()
-
-    digest = hashlib.md5(b_contents).hexdigest()
+def write_to_db(name, algotext, perf, parameters, start, end):
+    digest = hashlib.md5(algotext.encode("utf-8")).hexdigest()
 
     db = records.Database(config['database']['url'])
     db.query("""
-        insert into strategies (filepath, body, md5sum)
-        values (:path, :body, :checksum)
+        insert into strategies (name, body, md5sum)
+        values (:name, :body, :checksum)
         on conflict do nothing
         """,
-        path=file, body=b_contents.decode("utf-8"), checksum=digest)
+        name=name, body=algotext, checksum=digest)
 
     result = db.query("""
         insert into test_runs
-        (strategy_id, parameters, results, pickle, created_at, starts_at, ends_at)
+        (strategy_id, securities, parameters, results, pickle, created_at, starts_at, ends_at)
         values (
             (select id from strategies where md5sum = :strategy_checksum),
-            :parameters, :results, :pickle_data, now(), :starts_at, :ends_at
+            :securities, :parameters, :results, :pickle_data, now(), :starts_at, :ends_at
         ) returning id
         """,
         strategy_checksum= digest,
-        parameters= json.dumps({}),
+        securities= parameters['securities'],
+        parameters= json.dumps(parameters),
         results= json.dumps({}),
         pickle_data= pickle.dumps(perf),
-        starts_at= kwargs.pop('start'),
-        ends_at= kwargs.pop('end'),
+        starts_at= start,
+        ends_at= end,
     )
 
     run_id = result.all()[0].id
