@@ -8,6 +8,7 @@ import records
 import json
 import pickle
 import pyfolio as pf
+import pandas as pd
 
 from pathlib import Path
 from importlib import import_module
@@ -60,7 +61,9 @@ def main(start, end, file):
 
     result = runpy.run_path(file, None, file)
 
-    data = load_from_yahoo(stocks=result.get('universe')(), indexes={}, start=start, end=end)
+    start_data = start - pd.DateOffset(months=12)
+
+    data = load_from_yahoo(stocks=result.get('universe')(), indexes={}, start=start_data, end=end)
     data = data.dropna()
 
     algo = TradingAlgorithm(
@@ -74,7 +77,7 @@ def main(start, end, file):
         ),
     )
 
-    perf = algo.run(data)
+    perf = algo.run(data, overwrite_sim_params=False)
     dir(perf)
     write_to_db(file, perf, start= start, end=end)
 

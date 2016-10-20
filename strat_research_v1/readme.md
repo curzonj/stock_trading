@@ -9,4 +9,4 @@ migrate -url driver://url -path ./db/migrate up
 
 # Work log
 
-- [ ] fix the run.py to support data before the run start so I can do the SMA strategies
+- [x] fix the run.py to support data before the run start so I can do the SMA strategies

@@ -1,4 +1,4 @@
-from zipline.api import * 
+from zipline.api import *
 
 def universe():
     return [ "SPY" ]
@@ -12,6 +12,7 @@ def initialize(context):
 
 def rebalance(context, data):
     price_history = data.history(context.sid, 'price', 200, '1d')
+
     if data.current(context.sid, "close") > price_history.mean():
         order_target_percent(context.sid, 1)
     else:
